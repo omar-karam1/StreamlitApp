@@ -1,0 +1,16 @@
+langchain
+langchain_community
+streamlit
+openai
+python-dotenv
+transformers
+nltk
+spacy
+requests
+pandas
+llama-index
+langchain
+ plotly
+
+
+
