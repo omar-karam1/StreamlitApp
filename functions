@@ -1,0 +1,416 @@
+import streamlit as st
+import pandas as pd
+from langchain_ollama import OllamaLLM
+import numpy as np
+from scipy.stats import zscore
+from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
+from sklearn.model_selection import train_test_split
+from sklearn.impute import KNNImputer
+import plotly.express as px
+from sklearn.metrics import classification_report, accuracy_score
+from xgboost import XGBClassifier
+from sklearn.preprocessing import LabelEncoder
+from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier
+import time
+
+def get_outlier_columns(df):
+    outlier_columns = []
+    numeric_columns = df.select_dtypes(include=[np.number]).columns
+    for column in numeric_columns:
+        z_scores = np.abs(zscore(df[column].dropna()))
+        if (np.abs(z_scores) > 3).any(): 
+            outlier_columns.append(column)
+    return outlier_columns
+
+
+
+def Change_Data_Type(column,new_type,df):
+    if st.button("Change Data Type"):
+        try:
+          if new_type == "int":
+             df[column] = pd.to_numeric(df[column], errors="coerce").fillna(0).astype(int)
+          elif new_type == "float":
+                 df[column] = pd.to_numeric(df[column], errors="coerce")
+          elif new_type == "string":
+                 df[column] = df[column].astype(str)
+          elif new_type == "datetime":
+               df[column] = pd.to_datetime(df[column], errors="coerce")
+          st.session_state.temp_df = df.copy()
+          st.success(f"Column '{column}' type changed to {new_type}.")
+        except Exception as e:
+            st.error(f"Error changing column type: {e}")
+
+def Rename_Column(df):
+     column = st.selectbox("Select Column to Rename", df.columns)
+     new_name = st.text_input("Enter New Column Name")
+
+     if st.button("Rename Column"):
+                if new_name:
+                    df.rename(columns={column: new_name}, inplace=True)
+                    st.session_state.temp_df = df.copy()
+                    st.success(f"Column '{column}' renamed to '{new_name}'.")
+                else:
+                    st.warning("Please enter a valid name.")
+def range_check(df):
+    numeric_columns = df.select_dtypes(include=[np.number]).columns.tolist()
+    selected_column = st.selectbox("Select Column", numeric_columns)
+    min_value = st.number_input("Enter Minimum Value", value=float(df[selected_column].min()))
+    max_value = st.number_input("Enter Maximum Value", value=float(df[selected_column].max()))
+    if st.button("Check Range"):
+        process_out_of_range_values(df, selected_column, min_value, max_value)
+
+def process_out_of_range_values(df, selected_column, min_value, max_value):
+    outside_range = df[(df[selected_column] < min_value) | (df[selected_column] > max_value)]
+
+    if not outside_range.empty:
+        st.warning(f"Found {len(outside_range)} values outside the range [{min_value}, {max_value}].")
+        st.write("Values Outside the Range:")
+        st.write(outside_range)
+        st.write("Handle Out-of-Range Values:")
+        action = st.selectbox("Select Action", ["Delete", "Replace with Mean", "Replace with Median"])
+        if st.button("Apply Changes"):
+            apply_changes(selected_column, min_value, max_value, action, outside_range)
+    else:
+        st.success(f"All values in '{selected_column}' are within the range [{min_value}, {max_value}].")
+
+def apply_changes( selected_column, min_value, max_value, action, outside_range):
+    temp_df_copy = st.session_state.temp_df.copy()
+
+    if action == "Delete":
+        temp_df_copy = temp_df_copy[
+            (temp_df_copy[selected_column] >= min_value) &
+            (temp_df_copy[selected_column] <= max_value)
+        ]
+        st.success(f"Deleted {len(outside_range)} out-of-range values.")
+
+    elif action == "Replace with Mean":
+        mean_value = temp_df_copy[selected_column].mean()
+        temp_df_copy.loc[
+            (temp_df_copy[selected_column] < min_value) | (temp_df_copy[selected_column] > max_value),
+            selected_column
+        ] = mean_value
+        st.success(f"Replaced out-of-range values with mean ({mean_value:.2f}).")
+
+    elif action == "Replace with Median":
+        median_value = temp_df_copy[selected_column].median()
+        temp_df_copy.loc[
+            (temp_df_copy[selected_column] < min_value) | (temp_df_copy[selected_column] > max_value),
+            selected_column
+        ] = median_value
+        st.success(f"Replaced out-of-range values with median ({median_value:.2f}).")
+
+    st.session_state.temp_df = temp_df_copy.copy()
+    st.success("Changes saved successfully!")
+
+def Issues(missing_columns,duplicate_rows_count,outlier_columns):
+     st.write(" Missing Values:")
+     if missing_columns:
+        st.write(f"Columns with missing values: {missing_columns}")
+     else:
+        st.write("No missing values detected.")
+
+     st.write("Duplicate Rows:")
+     if duplicate_rows_count > 0:
+        st.write(f"Number of duplicate rows: {duplicate_rows_count}")
+     else:
+        st.write("No duplicate rows detected.")
+
+     st.write("Outliers:")
+     if outlier_columns:
+        st.write(f"Columns with outliers (Z-Score > 3): {outlier_columns}")
+     else:
+        st.write("No outliers detected.")
+
+def handle_missing_values(missing_columns):
+    if missing_columns:
+        st.subheader("Handle Missing Values")
+        selected_column = st.selectbox("Select Column with Missing Values", missing_columns)
+        temp_df_copy = st.session_state.temp_df.copy()
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write("Before")
+            st.write(temp_df_copy[selected_column].isnull().sum())
+        action = st.selectbox("Select Action", [
+            "Drop Rows", 
+            "Fill with Mean", 
+            "Fill with Median", 
+            "Fill with Mode", 
+            "Fill with Custom Value", 
+            "Fill using KNN"
+          
+        ])
+        temp_df_copy = apply_missing_value_action(temp_df_copy, selected_column, action)
+        with col2:
+            st.write("After")
+            st.write(temp_df_copy[selected_column].isnull().sum())
+        if st.button("Save Missing Value Changes"):
+            st.session_state.temp_df = temp_df_copy.copy()
+            time.sleep(1)
+            st.rerun()
+    else:
+        st.success("No missing values detected")
+def apply_missing_value_action(temp_df, selected_column, action):
+    if action == "Drop Rows":
+        return temp_df.dropna(subset=[selected_column])
+    elif action == "Fill with Mean":
+        return fill_with_mean(temp_df, selected_column)
+    elif action == "Fill with Median":
+        return fill_with_median(temp_df, selected_column)
+    elif action == "Fill with Mode":
+        return fill_with_mode(temp_df, selected_column)
+    elif action == "Fill with Custom Value":
+        custom_value = st.text_input("Enter Custom Value")
+        return temp_df.assign(**{selected_column: temp_df[selected_column].fillna(custom_value)})
+    elif action == "Fill using KNN":
+        return fill_with_knn(temp_df, selected_column)
+    
+    else:
+        return temp_df
+
+def fill_with_mean(temp_df, column):
+    if pd.api.types.is_numeric_dtype(temp_df[column]):
+        temp_df[column] = temp_df[column].fillna(temp_df[column].mean())
+    else:
+        st.warning(f"Cannot fill missing values with mean in column '{column}' because it is not numeric.")
+    return temp_df
+
+def fill_with_median(temp_df, column):
+    if pd.api.types.is_numeric_dtype(temp_df[column]):
+        temp_df[column] = temp_df[column].fillna(temp_df[column].median())
+    else:
+        st.warning(f"Cannot fill missing values with median in column '{column}' because it is not numeric.")
+    return temp_df
+
+def fill_with_mode(temp_df, column):
+    mode_value = temp_df[column].mode().iloc[0] if not temp_df[column].mode().empty else None
+    temp_df[column] = temp_df[column].fillna(mode_value)
+    return temp_df
+
+def fill_with_knn(temp_df, column):
+    if pd.api.types.is_numeric_dtype(temp_df[column]):
+        st.write("KNN Parameters")
+        n_neighbors = st.slider("Select Number of Neighbors", min_value=1, max_value=10, value=5, step=1)
+        temp_df_single_col = temp_df[[column]]
+        imputer = KNNImputer(n_neighbors=n_neighbors)
+        temp_df[[column]] = imputer.fit_transform(temp_df_single_col)
+    else:
+        st.warning(f"The column '{column}' is not numeric. KNN Imputer can only be applied to numeric columns.")
+    return temp_df
+def Handle_Duplicates(duplicate_rows_count):
+    if duplicate_rows_count > 0:
+        st.subheader("Handle Duplicates")
+        col1, col2 = st.columns(2)
+        temp_df_copy = st.session_state.temp_df.copy()  
+        with col1:
+           st.write("### Before")
+           st.write(temp_df_copy.duplicated().sum())
+        if st.button("Remove Duplicates"):
+            temp_df_copy = temp_df_copy.drop_duplicates()
+            st.rerun()
+        with col2:
+            st.write("### After")
+            st.write(temp_df_copy.duplicated().sum())
+        if st.button("Save Duplicate Changes"):
+            st.session_state.temp_df = temp_df_copy.copy()  
+            st.success("Changes saved successfully!")
+            time.sleep(1)
+            st.rerun()
+    else:
+      st.success("No duplicate rows detected.")
+
+def handle_outliers(outlier_columns):
+    if outlier_columns:
+        st.subheader("Handle Outliers")
+        selected_column = st.selectbox("Select Column with Outliers", outlier_columns)
+        method = st.selectbox("Select Method", ["Z-Score", "IQR"])
+        col1, col2 = st.columns(2)
+        temp_df_copy = st.session_state.temp_df.copy()
+        with col1:
+            st.write("Before")
+            st.write(temp_df_copy[selected_column])
+        if method == "Z-Score":
+            temp_df_copy = temp_df_copy[np.abs(zscore(temp_df_copy[selected_column].dropna())) < 3]
+        elif method == "IQR":
+            Q1 = temp_df_copy[selected_column].quantile(0.25)
+            Q3 = temp_df_copy[selected_column].quantile(0.75)
+            IQR = Q3 - Q1
+            temp_df_copy = temp_df_copy[(temp_df_copy[selected_column] >= (Q1 - 1.5 * IQR)) & (temp_df_copy[selected_column] <= (Q3 + 1.5 * IQR))]
+        with col2:
+            st.write("After")
+            st.write(temp_df_copy[selected_column])
+        if st.button("Save Changes"):
+            st.session_state.temp_df = temp_df_copy.copy()
+            st.success("Changes saved successfully!")
+            time.sleep(1)
+            st.rerun()
+    else:
+        st.success("No outliers detected.")   
+
+
+
+def handle_feature_scaling(df, numeric_columns):
+    st.subheader("Feature Scaling")
+    scaling_option = st.selectbox("Select Scaling Method", ["MinMaxScaler", "StandardScaler", "RobustScaler"])
+
+    scale_all = st.checkbox("Apply to all numeric columns", value=False)
+    if not scale_all:
+        column = st.selectbox("Select Column to Scale", numeric_columns)
+        selected_columns = [column]
+    else:
+        selected_columns = numeric_columns
+
+    if st.button("Apply Scaling"):
+        scaler = None
+        if scaling_option == "MinMaxScaler":
+            scaler = MinMaxScaler()
+        elif scaling_option == "StandardScaler":
+            scaler = StandardScaler()
+        elif scaling_option == "RobustScaler":
+            scaler = RobustScaler()
+
+        if scaler:
+            temp_df_copy = st.session_state.temp_df.copy()
+            before_scaling = temp_df_copy[selected_columns].copy()
+            temp_df_copy[selected_columns] = scaler.fit_transform(temp_df_copy[selected_columns])
+            st.session_state.temp_df = temp_df_copy.copy()
+
+            st.success(f"Applied {scaling_option} scaling to {', '.join(selected_columns)}.")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write("### Before Scaling")
+                st.write(before_scaling.describe())
+            with col2:
+                st.write("### After Scaling")
+                st.write(temp_df_copy[selected_columns].describe())
+
+            if len(selected_columns) == 1:
+                st.write("### Visualization")
+                col_name = selected_columns[0]
+                fig = px.histogram(temp_df_copy, x=col_name, title=f"{col_name} After Scaling")
+                st.plotly_chart(fig)
+        else:
+            st.warning("Please select a valid scaling method.")
+
+def encoding(df,encoding_option,column):
+    temp_df_copy = df.copy()
+    col1, col2 = st.columns(2)
+    with col1:
+      st.write("Before")
+      st.write(temp_df_copy[column])
+    if encoding_option == "Label Encoding":
+        df_encoded =label_encoding(temp_df_copy, column)
+        with col2:
+            st.write("### After Label Encoding:")
+            st.write(df_encoded[column])
+       
+       
+    elif encoding_option == "One-Hot Encoding":
+        df_encoded = one_hot_encoding(temp_df_copy, column)
+        with col2:
+            st.write("### After One-Hot Encoding:")
+            st.write(df_encoded)
+    if st.button("Save Changes"):
+        st.session_state.df = df_encoded 
+        st.session_state.temp_df = df_encoded  
+        st.success(f"Changes to {column} saved successfully!")
+        time.sleep(1)
+        st.rerun()
+def label_encoding(df, column):
+    le = LabelEncoder()
+    df[column] = le.fit_transform(df[column])
+    return df
+  
+def one_hot_encoding(df, column):
+    df_encoded = pd.get_dummies(df, columns=[column], drop_first=False)
+    return df_encoded
+
+def split_data(df, target_column, test_size):
+    try:
+        X = df.drop(columns=[target_column])
+        st.session_state['dftest'] = X  
+        y = df[target_column]
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
+        
+       
+        st.session_state['X_train'], st.session_state['X_test'] = X_train, X_test
+        st.session_state['y_train'], st.session_state['y_test'] = y_train, y_test
+
+        
+        st.write("Training Set Preview")
+        st.write(pd.concat([X_train, y_train], axis=1).head())
+        st.write("Testing Set Preview")
+        st.write(pd.concat([X_test, y_test], axis=1).head())
+
+        
+        st.write("Training Set Statistics")
+        st.write(X_train.describe())
+        st.write("Testing Set Statistics")
+        st.write(X_test.describe())
+        st.success("Data successfully split into training and testing sets.")
+       
+        if st.checkbox("Save Split Data as CSV"):
+            save_data_as_csv(X_train, X_test, y_train, y_test)
+            st.success("Data successfully.") 
+    except Exception as e:
+        st.error(f"Error splitting data: {e}")
+
+def save_data_as_csv(X_train, X_test, y_train, y_test):
+   
+    X_train.to_csv("X_train.csv", index=False)
+    X_test.to_csv("X_test.csv", index=False)
+    y_train.to_csv("y_train.csv", index=False)
+    y_test.to_csv("y_test.csv", index=False)
+    st.success("Training and testing sets saved as CSV files.")
+
+def evaluate_model(model_option, X_train, X_test, y_train, y_test):
+    try:
+       
+        model = select_model(model_option)
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
+        st.session_state['model'] = model  
+        st.write("### Classification Report")
+        st.text(classification_report(y_test, y_pred))
+        st.write("### Accuracy Score")
+        st.write(accuracy_score(y_test, y_pred))
+        st.success(f"Model {model_option} evaluated successfully.") 
+        if st.button("Save Model"):
+           st.session_state['model'] = model             
+    except Exception as e:
+        st.error(f"Error during model evaluation: {e}")
+        
+def select_model(model_option):
+    if model_option == 'XGBoost Classifier':
+        return XGBClassifier(random_state=42)
+    elif model_option == 'Support Vector Machine':
+        return SVC(random_state=42)
+    elif model_option == 'Random Forest Classifier':
+        return RandomForestClassifier(random_state=42)
+    else:
+        raise ValueError("Invalid model option")
+
+def predict_with_model():
+    if 'model' not in st.session_state:
+        st.error("No model found. Please train and save a model first.")
+        return
+
+    model = st.session_state['model']
+    df= st.session_state['dftest']
+    name=st.text_input("please enter your name:")
+    st.write("### Enter Feature Values for Prediction")
+    input_data = {}
+    
+   
+    for column in df.columns:
+        value = st.number_input(f"Enter value for {column}:", value=0.0)
+        input_data[column] = value
+    
+    input_values = [input_data[col] for col in df.columns]
+    
+    if st.button("Predict"):
+        try:
+            prediction = model.predict([input_values])
+            st.write(f" {name} Prediction: {prediction[0]}")
+        except Exception as e:
+            st.error(f"Error during prediction: {e}")
