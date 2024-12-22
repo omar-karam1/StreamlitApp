@@ -1,6 +1,6 @@
-# Data Quality Task App
+# DataRefiner App
 
-**Data Quality Task App** is an interactive web application built using [Streamlit](https://streamlit.io/) to analyze, clean, and enhance the quality of datasets. The app offers various tools to handle common data issues, such as missing values, duplicates, and outliers, along with data exploration, visualization, and an AI-driven question-answering feature using a Large Language Model (LLM).
+**DataRefiner App** is an interactive web application built using [Streamlit](https://streamlit.io/) to analyze, clean, and enhance the quality of datasets. The app offers various tools to handle common data issues, such as missing values, duplicates, and outliers, along with data exploration, visualization, machine learning model building, and an AI-driven question-answering feature using a Large Language Model (LLM).
 
 ## **Key Features**
 ### **1. Upload and Preview Datasets**
@@ -40,10 +40,20 @@
   - Scatterplots.
   - Correlation Heatmaps.
 
-### **7. Interactive Data Chat (AI-Powered)**
-- Ask questions about your dataset with the "Chat using RAG" feature, powered by a Large Language Model like Ollama.
+### **7. Machine Learning Model Building and Evaluation**
+- **Split Data**: Split data into training and test sets.
+- **Train Models**: Train models like **XGBoost**, **SVM**, and **Random Forest** for classification tasks.
+- **Model Evaluation**: Evaluate the models' performance with metrics such as accuracy and classification report.
+- **Make Predictions**: Use trained models to make predictions on new data.
 
-### **8. Download Cleaned Data**
+### **8. Interactive Data Chat (AI-Powered)**
+- Ask questions about your dataset with the "Chat using RAG" feature, powered by a Large Language Model like Ollama. This feature allows users to ask natural language questions about their data and receive AI-generated answers.
+
+### **9. Feature Scaling and Encoding**
+- Apply feature scaling techniques such as **MinMax**, **Standard**, and **Robust scaling** to numeric columns.
+- Perform **Label Encoding** or **One-Hot Encoding** on categorical variables.
+
+### **10. Download Cleaned Data**
 - Download the cleaned dataset after making adjustments.
 
 ## **How to Use**
