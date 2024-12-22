@@ -11,6 +11,8 @@ pandas
 llama-index
 langchain
  plotly
+sklearn
+xgboost
 
 
 
