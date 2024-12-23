@@ -11,10 +11,10 @@ def main():
     st.set_page_config(
         page_title="Data Refiner",
         page_icon="📊"
-    )
+             )
 
+   
     st.title("Data Refiner App")
-
     st.sidebar.header("Upload Dataset")
     uploaded_file = st.sidebar.file_uploader("Choose a file", type=["csv", "xlsx"])
 
@@ -44,6 +44,7 @@ def main():
             "Rename Column",
             "Range Check",
             "Delete Column",
+            "Text Transformations",
             "Issues",
             "Handle Missing Values",
             "Handle Duplicates",
@@ -54,17 +55,19 @@ def main():
             "Split Data",
             "Model",
             "Use Model",
-            "Chat using RAG"
+            "Chat using RAG",
+             "Notes"
         ])
 
         if task == "Show data":
             st.write(df.head())
 
         elif task == "Info":
-            st.write("### Info")
-            buffer = io.StringIO()
-            df.info(buf=buffer)
-            st.text(buffer.getvalue())
+           st.write("### Info")
+           buffer = io.StringIO()
+           df.info(buf=buffer)
+           st.code(buffer.getvalue(), language="text")
+
 
         elif task == "Describe":
             st.subheader("Dataset Description")
@@ -83,6 +86,9 @@ def main():
         elif task == "Range Check":
             functions.range_check(df)
 
+        elif task == "Text Transformations":
+             functions.transform_text_column(df)
+        
         elif task == "Issues":
             st.subheader("Data Quality Issues")
             functions.Issues(missing_columns, duplicate_rows_count, outlier_columns)
@@ -109,7 +115,7 @@ def main():
 
         elif task == "Feature Scaling":
             numeric_columns = df.select_dtypes(include=[np.number]).columns.tolist()
-            functions.handle_feature_scaling(df, numeric_columns)
+            functions.handle_feature_scaling( numeric_columns)
 
         elif task == "Visualization":
             st.subheader("Data Visualization")
@@ -177,39 +183,54 @@ def main():
         elif task == "Use Model":
             st.subheader("Use Trained Model for Prediction")
             functions.predict_with_model()
-
+        
+        elif task == "Notes":
+                st.subheader("Personal Notes")
+                default_notes = st.session_state.get("notes", "")
+                notes = st.text_area(
+                "Write your notes here:", 
+                value=default_notes, 
+                height=300, 
+                placeholder="Start typing your notes here..." )
+                functions.save_notes(notes)
+       
         elif task == "Chat using RAG":
-            st.subheader("Ask Questions About Your Dataset")
-            llm = OllamaLLM(model="llama3.2")
-            messages = st.session_state.get("chat_messages", [])
-            user_question = st.chat_input("Type your question here:")
+           st.subheader("Ask Questions About Your Dataset")
+           llm = OllamaLLM(model="llama3.2")
 
-            if user_question:
+           messages = st.session_state.get("chat_messages", [])
+           user_question = st.chat_input("Type your question here:")
+
+           if user_question:
                 messages.append({"role": "user", "content": user_question})
-                data_as_text = df.to_string(index=False)
+                context = functions.prepare_context(df)
                 prompt = f"""
-                    You are an AI assistant that answers questions based on the provided data.
-                    Data: {data_as_text}
-                    Question: {user_question}
-                    Answer:"""
-
+                You are an AI assistant that answers questions based on the provided dataset.
+                Dataset context:
+                   {context}
+        
+                Question: {user_question}
+                Answer:"""
                 response = llm.invoke(input=prompt, stop=["<|eot.id|>"])
                 messages.append({"role": "assistant", "content": response})
                 st.session_state["chat_messages"] = messages
 
-            for message in messages:
-                if message["role"] == "user":
-                    st.chat_message("user").write(message["content"])
-                elif message["role"] == "assistant":
-                    st.chat_message("assistant").write(message["content"])
-
+           for message in messages:
+               if message["role"] == "user":
+                  st.chat_message("user").write(message["content"])
+               elif message["role"] == "assistant":
+                  st.chat_message("assistant").write(message["content"])
         st.sidebar.header("Download Dataset")
         st.sidebar.download_button(
-            label="Download cleaned dataset",
-            data=st.session_state.temp_df.to_csv(index=False).encode("utf-8"),
-            file_name="cleaned_dataset.csv",
-            mime="text/csv"
+        label="Download cleaned dataset",
+        data=st.session_state.temp_df.to_csv(index=False).encode("utf-8"),
+        file_name="cleaned_dataset.csv",
+        mime="text/csv"
         )
+   
+
+    else:
+         functions.display_app_description()
 
 if __name__ == "__main__":
     main()
