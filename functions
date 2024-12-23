@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from langchain_ollama import OllamaLLM
+from datetime import datetime
 import numpy as np
 from scipy.stats import zscore
 from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
@@ -13,6 +13,24 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
 import time
+
+def display_app_description():
+    """
+    Display the title and description of the Data Refiner App.
+    """
+   
+    st.markdown("""
+    **Welcome to the Data Refiner App!**  
+    ✨ Your one-stop solution for refining, analyzing, and preparing data for machine learning models.  
+    This app provides a comprehensive set of tools to help you:  
+    - Explore your data through detailed visualizations and statistics.  
+    - Clean and preprocess your dataset effortlessly.  
+    - Split, encode, and scale data for better model performance.  
+    - Evaluate and apply machine learning models directly within the app.  
+
+    Enjoy an interactive experience and take your data analysis to the next level! 🚀  
+    """)
+
 
 def get_outlier_columns(df):
     outlier_columns = []
@@ -52,56 +70,111 @@ def Rename_Column(df):
                     st.success(f"Column '{column}' renamed to '{new_name}'.")
                 else:
                     st.warning("Please enter a valid name.")
+
 def range_check(df):
     numeric_columns = df.select_dtypes(include=[np.number]).columns.tolist()
-    selected_column = st.selectbox("Select Column", numeric_columns)
-    min_value = st.number_input("Enter Minimum Value", value=float(df[selected_column].min()))
-    max_value = st.number_input("Enter Maximum Value", value=float(df[selected_column].max()))
+    selected_column = st.selectbox("Select Column", numeric_columns, key="selected_column")
+    min_value = st.number_input("Enter Minimum Value", value=float(df[selected_column].min()), key="min_value")
+    max_value = st.number_input("Enter Maximum Value", value=float(df[selected_column].max()), key="max_value")
+
+  
     if st.button("Check Range"):
-        process_out_of_range_values(df, selected_column, min_value, max_value)
+        outside_range = df[(df[selected_column] < min_value) | (df[selected_column] > max_value)]
+        st.session_state["outside_range"] = outside_range  # Save to session state
 
-def process_out_of_range_values(df, selected_column, min_value, max_value):
-    outside_range = df[(df[selected_column] < min_value) | (df[selected_column] > max_value)]
+   
+        if "outside_range" in st.session_state and not st.session_state["outside_range"].empty:
+            outside_range = st.session_state["outside_range"]
+            st.warning(f"Found {len(outside_range)} values outside the range [{min_value}, {max_value}].")
+            st.write(outside_range)
 
-    if not outside_range.empty:
-        st.warning(f"Found {len(outside_range)} values outside the range [{min_value}, {max_value}].")
-        st.write("Values Outside the Range:")
-        st.write(outside_range)
-        st.write("Handle Out-of-Range Values:")
-        action = st.selectbox("Select Action", ["Delete", "Replace with Mean", "Replace with Median"])
-        if st.button("Apply Changes"):
-            apply_changes(selected_column, min_value, max_value, action, outside_range)
-    else:
-        st.success(f"All values in '{selected_column}' are within the range [{min_value}, {max_value}].")
+      
+            action = st.selectbox("Select Action", ["Delete", "Replace with Mean", "Replace with Median"], key="action")
+            if st.button("Apply Changes"):
+                 apply_changes(df, selected_column, min_value, max_value, action, outside_range)
+        else:
+            st.success(f"All values in '{selected_column}' are within the range [{min_value}, {max_value}].")
 
-def apply_changes( selected_column, min_value, max_value, action, outside_range):
-    temp_df_copy = st.session_state.temp_df.copy()
 
+
+def apply_changes(df, selected_column, min_value, max_value, action, outside_range):
+    if "temp_df" not in st.session_state:
+        st.session_state["temp_df"] = df.copy()
+    temp_df = st.session_state["temp_df"]
+
+  
     if action == "Delete":
-        temp_df_copy = temp_df_copy[
-            (temp_df_copy[selected_column] >= min_value) &
-            (temp_df_copy[selected_column] <= max_value)
-        ]
+        temp_df = temp_df[(temp_df[selected_column] >= min_value) & (temp_df[selected_column] <= max_value)]
         st.success(f"Deleted {len(outside_range)} out-of-range values.")
 
     elif action == "Replace with Mean":
-        mean_value = temp_df_copy[selected_column].mean()
-        temp_df_copy.loc[
-            (temp_df_copy[selected_column] < min_value) | (temp_df_copy[selected_column] > max_value),
+        mean_value = temp_df[selected_column].mean()
+        temp_df.loc[
+            (temp_df[selected_column] < min_value) | (temp_df[selected_column] > max_value),
             selected_column
         ] = mean_value
         st.success(f"Replaced out-of-range values with mean ({mean_value:.2f}).")
 
     elif action == "Replace with Median":
-        median_value = temp_df_copy[selected_column].median()
-        temp_df_copy.loc[
-            (temp_df_copy[selected_column] < min_value) | (temp_df_copy[selected_column] > max_value),
+        median_value = temp_df[selected_column].median()
+        temp_df.loc[
+            (temp_df[selected_column] < min_value) | (temp_df[selected_column] > max_value),
             selected_column
         ] = median_value
         st.success(f"Replaced out-of-range values with median ({median_value:.2f}).")
 
-    st.session_state.temp_df = temp_df_copy.copy()
-    st.success("Changes saved successfully!")
+    st.session_state["temp_df"] = temp_df
+
+ 
+def transform_text_column(df):
+    st.subheader("Text Transformations")
+    text_columns = df.select_dtypes(include=["object"]).columns.tolist()
+
+    if len(text_columns) > 0:
+        selected_column = st.selectbox("Select a Text Column", text_columns)
+        temp_df_copy = st.session_state.temp_df.copy()
+
+        # اختيار التحويل المطلوب
+        transformation = st.selectbox(
+            "Select a Transformation",
+            ["Uppercase", "Lowercase", "Strip Whitespaces", "Remove Numbers", "Replace Text"]
+        )
+
+        # تطبيق التحويل على نسخة مؤقتة
+        if transformation == "Uppercase":
+            temp_df_copy[selected_column] = temp_df_copy[selected_column].str.upper()
+        elif transformation == "Lowercase":
+            temp_df_copy[selected_column] = temp_df_copy[selected_column].str.lower()
+        elif transformation == "Strip Whitespaces":
+            temp_df_copy[selected_column] = temp_df_copy[selected_column].str.strip()
+        elif transformation == "Remove Numbers":
+            temp_df_copy[selected_column] = temp_df_copy[selected_column].str.replace(r'\d+', '', regex=True)
+        elif transformation == "Replace Text":
+            old_text = st.text_input("Enter the text to replace:")
+            new_text = st.text_input("Enter the new text:")
+            if old_text and new_text:
+                temp_df_copy[selected_column] = temp_df_copy[selected_column].str.replace(old_text, new_text, regex=False)
+
+        # زر الحفظ للتطبيق النهائي
+        if st.button("Apply Transformation"):
+            st.session_state.temp_df = temp_df_copy.copy()
+            st.success(f"Applied '{transformation}' to column '{selected_column}'.")
+            time.sleep(1)
+            st.rerun()
+
+        st.markdown("---")  
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write("Data Before Transformation")
+            st.write(st.session_state.temp_df[[selected_column]].head())
+        with col2:
+            st.write("Data After Transformation")
+            st.write(temp_df_copy[[selected_column]].head())
+
+    else:
+        st.warning("No text columns found in the dataset.")
+
+    
 
 def Issues(missing_columns,duplicate_rows_count,outlier_columns):
      st.write(" Missing Values:")
@@ -146,8 +219,10 @@ def handle_missing_values(missing_columns):
             st.write(temp_df_copy[selected_column].isnull().sum())
         if st.button("Save Missing Value Changes"):
             st.session_state.temp_df = temp_df_copy.copy()
+            st.success("Changes saved successfully!")
             time.sleep(1)
             st.rerun()
+            
     else:
         st.success("No missing values detected")
 def apply_missing_value_action(temp_df, selected_column, action):
@@ -206,8 +281,7 @@ def Handle_Duplicates(duplicate_rows_count):
            st.write("### Before")
            st.write(temp_df_copy.duplicated().sum())
         if st.button("Remove Duplicates"):
-            temp_df_copy = temp_df_copy.drop_duplicates()
-            st.rerun()
+            temp_df_copy = temp_df_copy.drop_duplicates() 
         with col2:
             st.write("### After")
             st.write(temp_df_copy.duplicated().sum())
@@ -249,7 +323,7 @@ def handle_outliers(outlier_columns):
 
 
 
-def handle_feature_scaling(df, numeric_columns):
+def handle_feature_scaling(numeric_columns):
     st.subheader("Feature Scaling")
     scaling_option = st.selectbox("Select Scaling Method", ["MinMaxScaler", "StandardScaler", "RobustScaler"])
 
@@ -349,19 +423,8 @@ def split_data(df, target_column, test_size):
         st.write(X_test.describe())
         st.success("Data successfully split into training and testing sets.")
        
-        if st.checkbox("Save Split Data as CSV"):
-            save_data_as_csv(X_train, X_test, y_train, y_test)
-            st.success("Data successfully.") 
     except Exception as e:
         st.error(f"Error splitting data: {e}")
-
-def save_data_as_csv(X_train, X_test, y_train, y_test):
-   
-    X_train.to_csv("X_train.csv", index=False)
-    X_test.to_csv("X_test.csv", index=False)
-    y_train.to_csv("y_train.csv", index=False)
-    y_test.to_csv("y_test.csv", index=False)
-    st.success("Training and testing sets saved as CSV files.")
 
 def evaluate_model(model_option, X_train, X_test, y_train, y_test):
     try:
@@ -414,3 +477,42 @@ def predict_with_model():
             st.write(f" {name} Prediction: {prediction[0]}")
         except Exception as e:
             st.error(f"Error during prediction: {e}")
+
+def save_notes(notes):
+    st.write("📝 Write down your thoughts, ideas, or notes below. You can save them locally for later use.")
+    if st.button("💾 Save Notes Locally"):
+        if not notes.strip():
+            st.warning("⚠️ Cannot save empty notes. Please write something!")
+        else:
+           
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            notes_with_timestamp = f"{notes}\n\nSaved on: {timestamp}"
+            st.session_state.notes = notes_with_timestamp
+            st.success("✅ Notes saved successfully!")
+    
+  
+    if st.session_state.get("notes"):
+        st.download_button(
+            label="📥 Download Notes as Text File",
+            data=st.session_state.notes.encode("utf-8"),
+            file_name="notes.txt",
+            mime="text/plain"
+        )
+        
+       
+        if st.button("🗑️ Clear Notes"):
+            del st.session_state.notes
+            st.warning("🗑️ Notes cleared successfully!")
+            time.sleep(1)
+            st.rerun()
+def prepare_context(df):
+    context = "The dataset contains the following columns:\n"
+    for column in df.columns:
+        column_info = f"- Column: {column}\n"
+        column_info += f"  - Data Type: {df[column].dtype}\n"
+        if df[column].dtype in ['int64', 'float64']:
+            column_info += f"  - Mean: {df[column].mean():.2f}, Min: {df[column].min()}, Max: {df[column].max()}\n"
+        column_info += f"  - Missing Values: {df[column].isnull().sum()}\n"
+        context += column_info + "\n"
+    return context
+
